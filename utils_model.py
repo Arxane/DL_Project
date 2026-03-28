@@ -1,8 +1,5 @@
 import torch
 
-"""Based on the logic that only layers that requires grad are modified and thus saved"""
-
-
 def load_model(model, path):
     checkpoint=torch.load(path)
     print(checkpoint.keys())
@@ -16,7 +13,10 @@ def save_model(model, path):
     keys = set(keys)
     print(keys)
     model_dict = model.state_dict()
-    model_dict = {k:v for k,v in model_dict.items() if k in keys}
+    
+    #Casting parameter values to 16-bit (.half()) to reduce communication cost
+    model_dict = {k: v.half() for k,v in model_dict.items() if k in keys}
+    
     torch.save(model_dict, path)
 
 def load_weights(model, path):
