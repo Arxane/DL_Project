@@ -15,11 +15,9 @@ pip install -e diffusers
 ```
 
 ## Data Preparation
-Download the datasets and put them in the ``/data`` der
-* DomainNet: https://ai.bu.edu/M3SDA/
+Download the dataset and put them in the ``/data`` der
 * PACS: https://huggingface.co/datasets/flwrlabs/pacs
-* UCM: https://huggingface.co/datasets/blanchon/UC_Merced
-* OfficeHome: https://huggingface.co/datasets/flwrlabs/office-home
+
 
 ## Training
 * Concept-level personalization
@@ -36,6 +34,13 @@ bash generate.sh
 ```bash
 bash clf_train.sh
 ```
+
+## Performance & Communication Optimizations
+This repository has been optimized for low-bandwidth communication and minimal VRAM usage:
+
+VQ-VAE Integration: Replaced the standard KL-Autoencoder with a discrete VQ-VAE to compress the latent space representation and reduce quantization artifacts during parameter transfer.
+
+Native 16-bit Precision: All model weights, embeddings, and gradients are explicitly cast to fp16 (or bf16), reducing network communication payloads by 50%.
 
 ## Citing our work
 If our work has contributed to your research, we would greatly appreciate an acknowledgement by citing us as follows:
