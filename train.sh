@@ -1,4 +1,4 @@
-DATASET='domainnet'
+DATASET='pacs'
 if [[ "$DATASET" == "officehome" ]]; then
     domains=("Art" "Clipart" "Product" "Real")
 elif [[ $DATASET == "domainnet" ]]; then

@@ -1,4 +1,5 @@
 import os
+import io
 import torch
 from PIL import Image
 from torch.utils.data import Dataset
@@ -6,9 +7,12 @@ from torchvision import transforms
 import random
 from collections import defaultdict
 
+import pandas as pd
+
 class PACSDataset(Dataset):
     def __init__(self, args, domain, split='train', num_shot=-1, root_dir="data/pacs/kfold", transform=None, tokenizer=None):
         self.root_dir = root_dir
+        self.parquet_path = os.path.join("data", "train-00000-of-00001.parquet")
         self.train_type = args.train_type
         if transform is None:
             if 'train' in split:  
@@ -36,6 +40,10 @@ class PACSDataset(Dataset):
 
         self.domains = args.domains + ["syn"]
         self.categories = args.categories
+
+        # Prefer folder-based PACS if present, otherwise fall back to parquet source.
+        self.use_parquet = not self._has_folder_layout() and os.path.exists(self.parquet_path)
+        self.parquet_rows = self._load_parquet_rows() if self.use_parquet else None
         self.image_paths = self._get_image_paths()
 
         self.split = split
@@ -48,19 +56,40 @@ class PACSDataset(Dataset):
         domain = self.domain
         split = self.split.split("_")[0]
         if not 'syn' in self.split:
-            domain_dir = os.path.join(self.root_dir, self.domain)
-            for category in self.categories:
-                category_dir = os.path.join(domain_dir, category)
-                for filename in os.listdir(category_dir):
-                    img_path = os.path.join(category_dir, filename)
-                    few_shot_dict[f"{category}_{domain}"].append([img_path, domain, category])                    
+            if self.use_parquet:
+                for row in self.parquet_rows:
+                    row_domain = row.get("domain")
+                    label = row.get("label")
+                    if row_domain != self.domain:
+                        continue
+                    if label is None or not (0 <= int(label) < len(self.categories)):
+                        continue
+                    category = self.categories[int(label)]
+                    image_dict = row.get("image")
+                    few_shot_dict[f"{category}_{domain}"].append([image_dict, domain, category])
 
-                if 'train' in self.split:
-                    # take the first num_shot images
-                    few_shot_dict[f"{category}_{domain}"] = few_shot_dict[f"{category}_{domain}"][:num_shot]
-                elif self.split == 'test':   
-                    # take the last num_shot images
-                    few_shot_dict[f"{category}_{domain}"] = few_shot_dict[f"{category}_{domain}"][-num_shot:]
+                for category in self.categories:
+                    key = f"{category}_{domain}"
+                    if 'train' in self.split:
+                        # take the first num_shot images
+                        few_shot_dict[key] = few_shot_dict[key][:num_shot]
+                    elif self.split == 'test':
+                        # take the last num_shot images
+                        few_shot_dict[key] = few_shot_dict[key][-num_shot:]
+            else:
+                domain_dir = os.path.join(self.root_dir, self.domain)
+                for category in self.categories:
+                    category_dir = os.path.join(domain_dir, category)
+                    for filename in os.listdir(category_dir):
+                        img_path = os.path.join(category_dir, filename)
+                        few_shot_dict[f"{category}_{domain}"].append([img_path, domain, category])                    
+
+                    if 'train' in self.split:
+                        # take the first num_shot images
+                        few_shot_dict[f"{category}_{domain}"] = few_shot_dict[f"{category}_{domain}"][:num_shot]
+                    elif self.split == 'test':   
+                        # take the last num_shot images
+                        few_shot_dict[f"{category}_{domain}"] = few_shot_dict[f"{category}_{domain}"][-num_shot:]
         else:
             file_suffix = self.split[6:].replace(f"_{num_shot}", "")
             domain_id = self.domains.index(self.domain)
@@ -82,8 +111,16 @@ class PACSDataset(Dataset):
         return len(self.image_paths)
 
     def __getitem__(self, idx):
-        image_path, domain, category = self.image_paths[idx]
-        image = Image.open(image_path).convert("RGB")
+        image_item, domain, category = self.image_paths[idx]
+        if self.use_parquet and isinstance(image_item, dict):
+            image_bytes = image_item.get("bytes")
+            if image_bytes is None:
+                raise ValueError("Parquet image row does not contain bytes payload.")
+            image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+            image_path = image_item.get("path", "")
+        else:
+            image_path = image_item
+            image = Image.open(image_path).convert("RGB")
         prompt = [f"a {domain} style of a {category}"]
 
         if self.tokenizer is None:
@@ -97,7 +134,22 @@ class PACSDataset(Dataset):
         class_id = self.categories.index(category)
         return image, prompt, domain_id, class_id, image_path
 
+    def _has_folder_layout(self):
+        domain_dir = os.path.join(self.root_dir, self.domain)
+        if not os.path.isdir(domain_dir):
+            return False
+        for category in self.categories:
+            if not os.path.isdir(os.path.join(domain_dir, category)):
+                return False
+        return True
+
+    def _load_parquet_rows(self):
+        df = pd.read_parquet(self.parquet_path, columns=["image", "domain", "label"])
+        return df.to_dict(orient="records")
+
     def _get_image_paths(self):
+        if self.use_parquet:
+            return []
         image_paths = []
         domain_dir = os.path.join(self.root_dir, self.domain)
         if os.path.isdir(domain_dir):
@@ -133,7 +185,7 @@ from torch.utils.data import ConcatDataset
 def get_dataloader_domain(args,
         batch_size, transform, split,
         domain, tokenizer, collate_fn, num_shot=-1,
-        num_workers=4, shuffle=True):
+    num_workers=4, shuffle=True, client_id=None):
     dataset = PACSDataset(args, 
             domain=domain, 
             num_shot=num_shot, 

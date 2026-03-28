@@ -142,7 +142,7 @@ def get_datasets(args, transform, tokenizer, num_shot=-1):
 def get_dataloader_domain(args,
         batch_size, transform, split,
         domain, tokenizer, collate_fn, num_shot=-1,
-        num_workers=4, shuffle=True):
+    num_workers=4, shuffle=True, client_id=None):
     dataset = DermaMNISTDataset(args, 
             domain=domain, 
             num_shot=num_shot, 

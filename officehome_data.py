@@ -120,7 +120,7 @@ from torch.utils.data import ConcatDataset
 def get_dataloader_domain(args,
         batch_size, transform, split,
         domain, tokenizer, collate_fn, num_shot=-1,
-        num_workers=4, shuffle=True):
+        num_workers=4, shuffle=True, client_id=None):
     dataset = OfficeHomeDataset(args, 
             domain=domain, 
             num_shot=num_shot, 
@@ -128,6 +128,7 @@ def get_dataloader_domain(args,
             root_dir="data/officehome", 
             transform=transform,
             tokenizer=tokenizer, 
+            client_id=client_id,
         )
     categories = dataset.categories
     dataloader = torch.utils.data.DataLoader(
