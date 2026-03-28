@@ -68,7 +68,7 @@ def get_prompt_embeddings(prompt_domain, prompt_class, labels, tokenizer,
         return_tensors="pt"
     )
     input_ids = torch.LongTensor(inputs.input_ids)
-    text_f = text_encoder(input_ids.to('cuda'))[0]
+    text_f = text_encoder(input_ids.to(text_encoder.device))[0]
     if args.dataset in ['bloodmnist', 'dermamnist', 'ucm']:
         st_idx_map_class = {
             'bloodmnist': 7,
@@ -100,7 +100,7 @@ def log_validation(latents_test, prompt_domain, prompt_class, vae, text_encoder,
     categories = args.categories
     logger.info("Running validation... ")
 
-    device=torch.device('cuda')
+    device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     model=StableDiffusionPipeline(
         vae=vae,
@@ -319,7 +319,7 @@ def main():
     logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
     logger.info(f"  Total optimization steps = {args.max_train_steps}")
 
-    device=torch.device("cuda")
+    device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Start training")
     
     for idx, train_dataloader in enumerate(trainloaders):
@@ -402,9 +402,13 @@ def main():
                     encoder_hidden_states = get_prompt_embeddings(prompt_domain, prompt_class, labels, tokenizer, text_encoder, num_prompt_class=num_prompt_class)
                     batch["input_conditions"] = None
 
-                model_pred = unet(
-                    noisy_latents, timesteps, encoder_hidden_states, 
-                    controlnet_cond=batch["input_conditions"]).sample
+                if batch["input_conditions"] is not None:
+                    model_pred = unet(
+                        noisy_latents, timesteps, encoder_hidden_states, 
+                        controlnet_cond=batch["input_conditions"]).sample
+                else:
+                    model_pred = unet(
+                        noisy_latents, timesteps, encoder_hidden_states).sample
                 loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
 
                 train_loss += loss.item()
@@ -419,7 +423,10 @@ def main():
                 global_step += 1
                 if global_step%1==0:
                     train_loss = train_loss/1
+                try:
                     accelerator.log({"train_loss": train_loss, "lr": lr_scheduler.get_last_lr()[0]}, step=global_step)
+                except AttributeError:
+                    pass
                     loss_history.append(train_loss)
                     train_loss = 0.0
                     curious_time = 0

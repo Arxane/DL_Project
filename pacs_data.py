@@ -12,7 +12,7 @@ import pandas as pd
 class PACSDataset(Dataset):
     def __init__(self, args, domain, split='train', num_shot=-1, root_dir="data/pacs/kfold", transform=None, tokenizer=None):
         self.root_dir = root_dir
-        self.parquet_path = os.path.join("data", "train-00000-of-00001.parquet")
+        self.parquet_path = os.path.join("data", "pacs", "train-00000-of-00001.parquet")
         self.train_type = args.train_type
         if transform is None:
             if 'train' in split:  
