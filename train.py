@@ -19,7 +19,7 @@ import torch.distributed as dist
 
 from torchvision import transforms
 
-from diffusers import AutoencoderKL, DDPMScheduler, StableDiffusionPipeline, UNet2DConditionModel
+from diffusers import VQModel, AutoencoderKL, DDPMScheduler, StableDiffusionPipeline, UNet2DConditionModel
 from diffusers.optimization import get_scheduler
 
 from transformers import CLIPTextModel, CLIPTokenizer
@@ -201,7 +201,7 @@ def main():
         subfolder="text_encoder",
         revision=args.revision,
     )
-    vae = AutoencoderKL.from_pretrained(
+    vae = VQModel.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="vae",
         revision=args.revision,
@@ -242,19 +242,18 @@ def main():
             "class_ids": class_ids,
         }
     
-    weight_dtype = torch.float32
-    if accelerator.mixed_precision == "fp16":
-        weight_dtype = torch.float16
-    elif accelerator.mixed_precision == "bf16":
-        weight_dtype = torch.bfloat16
-    print('weight_dtype',weight_dtype)
+    weight_dtype = torch.float16 
+    print('Forced weight_dtype to:', weight_dtype)
 
     vae.requires_grad_(False)
     text_encoder.requires_grad_(False)
     unet.requires_grad_(False)
+    
     text_encoder.to(accelerator.device, dtype=weight_dtype)
     vae.to(accelerator.device, dtype=weight_dtype)
-    unet.to(accelerator.device)
+
+    
+    unet.to(accelerator.device, dtype=weight_dtype)
     if args.gradient_checkpointing:
         unet.enable_gradient_checkpointing()
 
@@ -375,8 +374,7 @@ def main():
         for epoch in range(args.num_train_epochs):
             unet.train()
             for step, batch in enumerate(train_dataloader):
-                latents = vae.encode(batch["pixel_values"].to(weight_dtype).to(device)).latent_dist.sample()
-                latents = latents * 0.18215
+                latents = vae.encode(batch["pixel_values"].to(weight_dtype).to(device)).latents
 
                 noise = torch.randn_like(latents)
                 bsz = latents.shape[0]
@@ -441,8 +439,8 @@ def main():
                     if 'concept' in args.train_type:
                         save_model(unet, args.output_dir+'/unet.pth')
                     elif 'prompt' in args.train_type:
-                        torch.save(prompt_domain, args.output_dir+f'/prompt_domain_{idx}.pth')
-                        torch.save(prompt_class, args.output_dir+f'/prompt_class_{idx}.pth')
+                        torch.save(prompt_domain.half(), args.output_dir+f'/prompt_domain_{idx}.pth')
+                        torch.save(prompt_class.half(), args.output_dir+f'/prompt_class_{idx}.pth')
 
                 plt.figure()
                 plt.plot(loss_history)
@@ -450,13 +448,11 @@ def main():
                 plt.close()
 
         if epoch%args.log_every_epochs==0 or epoch==args.num_train_epochs-1:        
-            # log_validation(latents_test, prompt_domain, prompt_class, vae, text_encoder, tokenizer, unet, args, accelerator, noise_scheduler, epoch, num_prompt_class)
             if 'concept' in args.train_type:
                 save_model(unet, args.output_dir+'/unet.pth')
             elif 'prompt' in args.train_type:
-                torch.save(prompt_domain, args.output_dir+f'/prompt_domain_{idx}.pth')
-                torch.save(prompt_class, args.output_dir+f'/prompt_class_{idx}.pth')
+                torch.save(prompt_domain.half(), args.output_dir+f'/prompt_domain_{idx}.pth')
+                torch.save(prompt_class.half(), args.output_dir+f'/prompt_class_{idx}.pth')
 
 if __name__ == "__main__":
     main()
-# First use CLIP-Inversion to augment the training data?
